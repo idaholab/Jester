@@ -32,6 +32,7 @@ struct FileConfig {
     pattern: String,
     container_id: String,
     data_source_id: String,
+    metadata_data_source_id: String,
 }
 
 #[derive(Debug)]
