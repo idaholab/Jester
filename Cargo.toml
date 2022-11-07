@@ -10,3 +10,5 @@ clap = { version = "4.0.17", features = ["derive"] }
 wild = "2.1.0"
 serde = { version = "1.0.145", features = ["derive"]}
 serde_yaml = "0.9"
+notify-debouncer-mini = { version = "*", default-features = false }
+notify = {version = "5.0.0", features = ["serde"]}

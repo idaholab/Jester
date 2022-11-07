@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_yaml::from_reader;
 use std::fs::File;
 use std::path::PathBuf;
+use std::sync::mpsc::{channel, Sender};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -32,6 +34,12 @@ struct FileConfig {
     data_source_id: String,
 }
 
+#[derive(Debug)]
+enum DataSourceMessage {
+    Data(Vec<u8>),
+    Close
+}
+
 fn main() {
     let cli: Arguments = Arguments::parse();
     let config_file_path = match cli.config_file {
@@ -58,9 +66,48 @@ fn main() {
         }
     };
 
-    println!("{:?}", config_file);
+    // run through all the files and open a single connection to the data sources, was meant to
+    // hold a websocket connection
+    let mut data_source_channels: HashMap<String, Sender<DataSourceMessage>> = HashMap::new();
+    for directory in &config_file.directories {
+        for file in &directory.files {
+            if !data_source_channels.contains_key(file.data_source_id.as_str()) {
+                let (tx, rx) = channel::<DataSourceMessage>();
+                std::thread::spawn(move || {
+                    while let Ok(message) = rx.recv(){
+                        println!("{:?}", message);
+                    }
+                });
 
-    // fetch DeepLynx timeseries data source by ID
+                match data_source_channels.insert(file.data_source_id.clone(), tx) {
+                    Some(_) => {},
+                    None => {
+                        println!("unable to start data source hash map");
+                        std::process::exit(1)
+                    }
+                }
+            }
+        }
+    }
 
-    // deserialize the data source's config into the timeseries column setup
+
+    // for each directory start a file watcher - we start these in threads because we'll be tailing
+    // the files
+    let mut handles = vec![];
+    for directory in config_file.directories {
+        let channels = data_source_channels.clone();
+        let thread = std::thread::spawn(move || {
+            channels.iter();
+        });
+        handles.push(thread);
+    }
+
+    // if all the directory threads finish it means the directory's no longer exist and the program
+    // should be exited with an error
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    println!("Directories listed in configuration file no longer exist or cannot be listened to");
+    std::process::exit(1)
 }
