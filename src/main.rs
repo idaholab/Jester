@@ -1,123 +1,30 @@
+extern crate core;
+
+mod plugin;
+
 use clap::Parser;
-use jester_core::{Plugin, PluginDeclaration};
-use libloading::{Error, Library, Symbol};
 use serde::{Deserialize, Serialize};
 use serde_yaml::from_reader;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs::File;
-use std::io;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
+use crate::plugin::Plugin;
 use std::alloc::System;
 
 // needed to make sure we don't accidentally free a string in our plugin system
 #[global_allocator]
 static ALLOCATOR: System = System;
 
-/// A proxy object which wraps a [`Plugin`] and makes sure it can't outlive
-/// the library it came from.
-pub struct FunctionProxy {
-    function: Box<dyn jester_core::Plugin>,
-    _lib: Rc<libloading::Library>,
-}
-
-impl jester_core::Plugin for FunctionProxy {
-    fn process(&self, args: String) -> String {
-        self.function.process(args)
-    }
-}
-
-pub struct ExternalFunctions {
-    functions: HashMap<String, FunctionProxy>,
-    libraries: Vec<Rc<libloading::Library>>,
-}
-
-impl ExternalFunctions {
-    pub fn new() -> ExternalFunctions {
-        ExternalFunctions {
-            functions: HashMap::<String, FunctionProxy>::default(),
-            libraries: Vec::<Rc<libloading::Library>>::default(),
-        }
-    }
-
-    pub unsafe fn load<P: AsRef<OsStr>>(&mut self, library_path: P) -> io::Result<()> {
-        // load the library into memory
-        let library = match Library::new(library_path) {
-            Ok(l) => l,
-            Err(e) => {
-                panic!("unable to load plugin {:?}", e)
-            }
-        };
-
-        let library = Rc::new(library);
-
-        // get a pointer to the plugin_declaration symbol.
-        let decl = match library.get::<*mut PluginDeclaration>(b"plugin_declaration\0") {
-            Ok(d) => d,
-            Err(e) => {
-                panic!("unable to load plugin declaration {:?}", e)
-            }
-        };
-
-        let decl = decl.read();
-
-        // version checks to prevent accidental ABI incompatibilities
-        if decl.rustc_version != jester_core::RUSTC_VERSION
-            || decl.core_version != jester_core::CORE_VERSION
-        {
-            return Err(io::Error::new(io::ErrorKind::Other, "Version mismatch"));
-        }
-
-        let mut registrar = PluginRegistrar::new(Rc::clone(&library));
-
-        (decl.register)(&mut registrar);
-
-        // add all loaded plugins to the functions map
-        self.functions.extend(registrar.functions);
-        // and make sure ExternalFunctions keeps a reference to the library
-        self.libraries.push(library);
-
-        Ok(())
-    }
-
-    pub fn process(&self, s: String) -> String {
-        self.functions.get("isu").unwrap().process(s)
-    }
-}
-
-struct PluginRegistrar {
-    functions: HashMap<String, FunctionProxy>,
-    lib: Rc<libloading::Library>,
-}
-
-impl PluginRegistrar {
-    fn new(lib: Rc<libloading::Library>) -> PluginRegistrar {
-        PluginRegistrar {
-            lib,
-            functions: HashMap::default(),
-        }
-    }
-}
-
-impl jester_core::PluginRegistrar for PluginRegistrar {
-    fn register_function(&mut self, name: &str, function: Box<dyn Plugin>) {
-        let proxy = FunctionProxy {
-            function,
-            _lib: Rc::clone(&self.lib),
-        };
-        self.functions.insert(name.to_string(), proxy);
-    }
-}
-
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Arguments {
     #[clap(short, long, value_parser, value_name = "FILE")]
     config_file: Option<PathBuf>,
+    #[clap(short, long)]
+    plugin_path: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -153,18 +60,6 @@ type DataSources = Arc<RwLock<HashMap<String, mpsc::Sender<DataSourceMessage>>>>
 
 #[tokio::main]
 async fn main() {
-    // create our functions table and load the plugin
-    let mut functions = ExternalFunctions::new();
-
-    unsafe {
-        functions
-            .load("/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so")
-            .expect("Plugin loading failed");
-    }
-
-    let result = functions.process("BOB".to_string());
-    println!("{}", result);
-
     let cli: Arguments = Arguments::parse();
     let config_file_path = match cli.config_file {
         None => {
@@ -189,6 +84,34 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    let plugin_path = match cli.plugin_path {
+        None => {
+            println!("You must provide a project plugin in order for Jester to function properly");
+            std::process::exit(1);
+        }
+        Some(p) => p,
+    };
+
+    let mut functions: Option<Plugin> = None;
+
+    unsafe {
+        let mut external_functions =
+            Plugin::new("/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so")
+                .expect("Plugin loading failed");
+
+        functions = Some(external_functions)
+    }
+
+    let mut plugin = match functions {
+        None => {
+            panic!("unable to load plugin")
+        }
+        Some(p) => p,
+    };
+
+    let result = plugin.process("BOB".to_string());
+    println!("{}", result);
 
     if config_file.directories.len() <= 0 {
         println!("Must provide directories to monitor");
@@ -226,13 +149,13 @@ async fn main() {
         results.push(handle.await);
     }
 
-    println!("Directories listed in configuration file no longer exist or cannot be listened to, exiting..");
     for result in results {
         match result {
             Ok(_) => {}
             Err(e) => println!("error in spawned watcher {:?}", e),
         }
     }
+    println!("Directories listed in configuration file no longer exist or cannot be listened to, exiting..");
     std::process::exit(0)
 }
 

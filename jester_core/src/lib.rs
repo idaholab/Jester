@@ -1,7 +1,7 @@
 pub static CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 
-pub trait Plugin {
+pub trait Processor {
     fn process(&self, input: String) -> String;
 }
 
@@ -12,7 +12,7 @@ pub struct PluginDeclaration {
 }
 
 pub trait PluginRegistrar {
-    fn register_function(&mut self, name: &str, function: Box<dyn Plugin>);
+    fn register_function(&mut self, function: Box<dyn Processor>);
 }
 
 #[macro_export]
