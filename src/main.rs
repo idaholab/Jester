@@ -102,32 +102,38 @@ async fn main() {
         }
     }
 
+    let mut functions: Option<Plugin> = None;
+
+    unsafe {
+        let mut external_functions =
+            Plugin::new("/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so")
+                .expect("Plugin loading failed");
+
+        functions = Some(external_functions)
+    }
+
+    let mut plugin = match functions {
+        None => {
+            panic!("unable to load plugin")
+        }
+        Some(p) => p,
+    };
+
+    let plugin = Arc::new(RwLock::new(plugin));
+
     // for each directory start a file watcher - we start these in threads because we'll be tailing
     // the files
     let mut handles = vec![];
     for directory in config_file.directories {
         let channels = data_source_channels.clone();
+        let inner_plugin = plugin.clone();
         let thread = tokio::spawn(async move {
             for (_, chan) in channels.read().await.iter() {
-                let mut functions: Option<Plugin> = None;
-
-                unsafe {
-                    let mut external_functions = Plugin::new(
-                        "/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so",
-                    )
-                    .expect("Plugin loading failed");
-
-                    functions = Some(external_functions)
-                }
-
-                let mut plugin = match functions {
-                    None => {
-                        panic!("unable to load plugin")
-                    }
-                    Some(p) => p,
-                };
-
-                &plugin.process(ProcessorReader::new(), chan.clone(), chan.clone());
+                inner_plugin.clone().read().await.process(
+                    ProcessorReader::new(),
+                    chan.clone(),
+                    chan.clone(),
+                );
             }
         });
 
@@ -161,6 +167,7 @@ async fn data_source_thread(data_sources: DataSources, data_source_id: &String) 
         tokio::spawn(async move {
             while let Ok(message) = rx.recv() {
                 println!("{:?}", message);
+                // BODY WHERE WE SEND THINGS OR ACT ON DATA SOURCE MESSAGES
             }
         });
 
