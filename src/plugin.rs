@@ -1,8 +1,10 @@
-use jester_core::{PluginDeclaration, Processor};
+use jester_core::errors::ProcessorError;
+use jester_core::{DataSourceMessage, PluginDeclaration, Processor, ProcessorReader};
 use libloading::Library;
 use std::ffi::OsStr;
 use std::io;
 use std::rc::Rc;
+use std::sync::mpsc::SyncSender;
 
 /// A proxy object which wraps a [`Processor`] and makes sure it can't outlive
 /// the library it came from.
@@ -12,8 +14,13 @@ pub struct PluginProxy {
 }
 
 impl Processor for PluginProxy {
-    fn process(&self, args: String) -> String {
-        self.function.process(args)
+    fn process(
+        &self,
+        input: ProcessorReader,
+        timeseries_chan: SyncSender<DataSourceMessage>,
+        metadata_chan: SyncSender<DataSourceMessage>,
+    ) -> Result<(), ProcessorError> {
+        self.function.process(input, timeseries_chan, metadata_chan)
     }
 }
 
@@ -21,6 +28,9 @@ pub struct Plugin {
     functions: PluginProxy,
     library: Rc<Library>,
 }
+
+unsafe impl Send for Plugin {}
+unsafe impl Sync for Plugin {}
 
 impl Plugin {
     pub unsafe fn new<P: AsRef<OsStr>>(library_path: P) -> Result<Plugin, io::Error> {
@@ -60,8 +70,14 @@ impl Plugin {
         })
     }
 
-    pub fn process(&mut self, s: String) -> String {
-        self.functions.process(s)
+    pub fn process(
+        &self,
+        input: ProcessorReader,
+        timeseries_chan: SyncSender<DataSourceMessage>,
+        metadata_chan: SyncSender<DataSourceMessage>,
+    ) -> Result<(), ProcessorError> {
+        self.functions
+            .process(input, timeseries_chan, metadata_chan)
     }
 }
 

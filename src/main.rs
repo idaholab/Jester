@@ -8,11 +8,13 @@ use serde_yaml::from_reader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use std::sync::{mpsc, Arc};
+use tokio::sync::RwLock;
 
 use crate::plugin::Plugin;
+use jester_core::{DataSourceMessage, ProcessorReader};
 use std::alloc::System;
+use std::os::unix::thread;
 
 // needed to make sure we don't accidentally free a string in our plugin system
 #[global_allocator]
@@ -49,14 +51,7 @@ struct FileConfig {
     metadata_data_source_id: String,
 }
 
-#[derive(Debug)]
-enum DataSourceMessage {
-    Test(String),
-    Data(Vec<u8>),
-    Close,
-}
-
-type DataSources = Arc<RwLock<HashMap<String, mpsc::Sender<DataSourceMessage>>>>;
+type DataSources = Arc<RwLock<HashMap<String, mpsc::SyncSender<DataSourceMessage>>>>;
 
 #[tokio::main]
 async fn main() {
@@ -93,26 +88,6 @@ async fn main() {
         Some(p) => p,
     };
 
-    let mut functions: Option<Plugin> = None;
-
-    unsafe {
-        let mut external_functions =
-            Plugin::new("/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so")
-                .expect("Plugin loading failed");
-
-        functions = Some(external_functions)
-    }
-
-    let mut plugin = match functions {
-        None => {
-            panic!("unable to load plugin")
-        }
-        Some(p) => p,
-    };
-
-    let result = plugin.process("BOB".to_string());
-    println!("{}", result);
-
     if config_file.directories.len() <= 0 {
         println!("Must provide directories to monitor");
         std::process::exit(1)
@@ -133,12 +108,29 @@ async fn main() {
     for directory in config_file.directories {
         let channels = data_source_channels.clone();
         let thread = tokio::spawn(async move {
-            for (id, channel) in channels.read().await.iter() {
-                channel
-                    .send(DataSourceMessage::Test("bob".to_string()))
-                    .await;
+            for (_, chan) in channels.read().await.iter() {
+                let mut functions: Option<Plugin> = None;
+
+                unsafe {
+                    let mut external_functions = Plugin::new(
+                        "/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so",
+                    )
+                    .expect("Plugin loading failed");
+
+                    functions = Some(external_functions)
+                }
+
+                let mut plugin = match functions {
+                    None => {
+                        panic!("unable to load plugin")
+                    }
+                    Some(p) => p,
+                };
+
+                &plugin.process(ProcessorReader::new(), chan.clone(), chan.clone());
             }
         });
+
         handles.push(thread);
     }
 
@@ -165,9 +157,9 @@ async fn data_source_thread(data_sources: DataSources, data_source_id: &String) 
         .await
         .contains_key(data_source_id.as_str())
     {
-        let (tx, mut rx) = mpsc::channel::<DataSourceMessage>(2048);
+        let (tx, mut rx) = mpsc::sync_channel(2048);
         tokio::spawn(async move {
-            while let Some(message) = rx.recv().await {
+            while let Ok(message) = rx.recv() {
                 println!("{:?}", message);
             }
         });

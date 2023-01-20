@@ -1,8 +1,41 @@
+pub mod errors;
+
+use crate::errors::ProcessorError;
+use std::io::Read;
+use std::sync::mpsc::SyncSender;
+
 pub static CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 
+#[derive(Debug)]
+pub enum DataSourceMessage {
+    File(String),
+    Test(String),
+    Data(Vec<u8>),
+    Close,
+}
+
+pub struct ProcessorReader {}
+
+impl ProcessorReader {
+    pub fn new() -> ProcessorReader {
+        ProcessorReader {}
+    }
+}
+
+impl Read for ProcessorReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Ok(2)
+    }
+}
+
 pub trait Processor {
-    fn process(&self, input: String) -> String;
+    fn process(
+        &self,
+        input: ProcessorReader,
+        timeseries_chan: SyncSender<DataSourceMessage>,
+        metadata_chan: SyncSender<DataSourceMessage>,
+    ) -> Result<(), ProcessorError>;
 }
 
 pub struct PluginDeclaration {
