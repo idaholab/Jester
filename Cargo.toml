@@ -12,3 +12,4 @@ serde = { version = "1.0.145", features = ["derive"]}
 serde_yaml = "0.9"
 notify-debouncer-mini = { version = "*", default-features = false }
 notify = {version = "5.0.0", features = ["serde"]}
+tokio = { version = "1", features = ["full", "io-util", "fs"] }
