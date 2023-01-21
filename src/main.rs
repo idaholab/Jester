@@ -27,7 +27,7 @@ use crate::errors::WatcherError;
 use glob::glob;
 use log::{debug, error, info, trace, warn};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteQueryResult};
-use sqlx::{Error, Pool, Sqlite, SqlitePool};
+use sqlx::{Pool, Sqlite, SqlitePool};
 
 use env_logger;
 use include_dir::include_dir;
@@ -63,7 +63,7 @@ struct FileConfig {
     metadata_data_source_id: Option<String>,
 }
 
-type DataSources = Arc<RwLock<HashMap<String, mpsc::SyncSender<DataSourceMessage>>>>;
+type DataSources = Arc<RwLock<HashMap<String, SyncSender<DataSourceMessage>>>>;
 
 #[tokio::main]
 async fn main() {
