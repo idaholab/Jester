@@ -25,10 +25,11 @@ use std::time::Duration;
 
 use crate::errors::WatcherError;
 use glob::glob;
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteQueryResult};
 use sqlx::{Error, Pool, Sqlite, SqlitePool};
 
+use env_logger;
 use include_dir::include_dir;
 use sqlx::Error::RowNotFound;
 use tokio::time::sleep;
@@ -66,7 +67,7 @@ type DataSources = Arc<RwLock<HashMap<String, mpsc::SyncSender<DataSourceMessage
 
 #[tokio::main]
 async fn main() {
-    pretty_env_logger::init();
+    env_logger::init();
 
     let cli: Arguments = Arguments::parse();
     let config_file_path = match cli.config_file {
@@ -227,6 +228,7 @@ async fn watch_file(
     // but since most OSes don't offer an async file event system, it's not the end of the world
     // match the pattern included by the user
     loop {
+        info!("starting watch on {}", file.path_pattern);
         for entry in glob(file.path_pattern.as_str())? {
             let path = match entry {
                 Ok(p) => p,
@@ -258,16 +260,20 @@ async fn watch_file(
                                 // we should double check the checksum of the file in insure it really is different
                                 // we're using adler here because it's great for quick data integrity checks and
                                 // that's all we need really, if it's the same, skip the file
-
                                 match f.checksum {
                                     None => {}
                                     Some(c) => {
                                         if c == checksum {
+                                            debug!("file at {} hasn't changed since transmission, skipping", &path.to_str().unwrap());
                                             continue;
                                         }
                                     }
                                 }
                             } else {
+                                debug!(
+                                    "file at {} hasn't changed since transmission, skipping",
+                                    &path.to_str().unwrap()
+                                );
                                 continue;
                             }
                         }
@@ -283,7 +289,9 @@ async fn watch_file(
                                 .execute(&db)
                                 .await
                             {
-                                Ok(_) => {}
+                                Ok(_) => {
+                                    debug!("file at {} added to database", &path.to_str().unwrap())
+                                }
                                 Err(e) => {
                                     error!(
                         "unable to update the database with initial record for {}: {:?}",
@@ -314,9 +322,14 @@ async fn watch_file(
                 Some(id) => match data_sources.write().await.get(id) {
                     None => {}
                     Some(channel) => {
-                        let path = path.clone();
-                        match channel.send(DataSourceMessage::File(path)) {
-                            Ok(_) => {}
+                        let p = path.clone();
+                        match channel.send(DataSourceMessage::File(p)) {
+                            Ok(_) => {
+                                debug!(
+                                    "transmitted file at {} to the data source",
+                                    &path.to_str().unwrap()
+                                );
+                            }
                             Err(e) => {
                                 error!("error sending file message to DataSource {:?}", e)
                             }
@@ -330,9 +343,14 @@ async fn watch_file(
                 Some(id) => match data_sources.write().await.get(id) {
                     None => {}
                     Some(channel) => {
-                        let path = path.clone();
-                        match channel.send(DataSourceMessage::File(path)) {
-                            Ok(_) => {}
+                        let p = path.clone();
+                        match channel.send(DataSourceMessage::File(p)) {
+                            Ok(_) => {
+                                debug!(
+                                    "transmitted file at {} to the data source",
+                                    &path.to_str().unwrap()
+                                );
+                            }
                             Err(e) => {
                                 error!("error sending file message to DataSource {:?}", e)
                             }
