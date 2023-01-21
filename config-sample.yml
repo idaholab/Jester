@@ -4,5 +4,4 @@ deep_lynx_url: ""
 files:
   - data_source_id: 1
     container_id: 1
-    metadata_data_source_id: 1
     path_pattern: "./sample_dir/*.csv"

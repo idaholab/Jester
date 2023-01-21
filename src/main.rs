@@ -8,16 +8,30 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::from_reader;
 use std::collections::HashMap;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use tokio::sync::RwLock;
 
 use crate::plugin::Plugin;
+use adler::adler32;
+use chrono::{DateTime, Utc};
 use jester_core::DataSourceMessage;
 use std::alloc::System;
+use std::fs;
+use std::io::BufReader;
+use std::str::FromStr;
+use std::sync::mpsc::{SendError, SyncSender};
+use std::time::Duration;
 
 use crate::errors::WatcherError;
 use glob::glob;
+use log::{error, info, trace, warn};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteQueryResult};
+use sqlx::{Error, Pool, Sqlite, SqlitePool};
+
+use include_dir::include_dir;
+use sqlx::Error::RowNotFound;
+use tokio::time::sleep;
 
 // needed to make sure we don't accidentally free a string in our plugin system
 #[global_allocator]
@@ -52,10 +66,12 @@ type DataSources = Arc<RwLock<HashMap<String, mpsc::SyncSender<DataSourceMessage
 
 #[tokio::main]
 async fn main() {
+    pretty_env_logger::init();
+
     let cli: Arguments = Arguments::parse();
     let config_file_path = match cli.config_file {
         None => {
-            println!("You must provide a configuration file path");
+            error!("You must provide a configuration file path");
             std::process::exit(1);
         }
         Some(p) => p,
@@ -64,7 +80,7 @@ async fn main() {
     let config_file = match File::open(config_file_path) {
         Ok(f) => f,
         Err(e) => {
-            println!("Unable to open config file {}", e);
+            error!("Unable to open config file {}", e);
             std::process::exit(1);
         }
     };
@@ -72,27 +88,43 @@ async fn main() {
     let config_file: Config = match from_reader(config_file) {
         Ok(t) => t,
         Err(e) => {
-            println!("Unable to parse config file {}", e);
+            error!("Unable to parse config file {}", e);
             std::process::exit(1);
         }
-    };
-
-    let plugin_path = match cli.plugin_path {
-        None => {
-            println!("You must provide a project plugin in order for Jester to function properly");
-            std::process::exit(1);
-        }
-        Some(p) => p,
     };
 
     if config_file.files.len() <= 0 {
-        println!("Must provide directories to monitor");
+        error!("Must provide directories to monitor");
         std::process::exit(1)
+    }
+
+    // create and/or connect to a local db file managed by sqlite
+    let options = match SqliteConnectOptions::from_str("sqlite://.jester.db") {
+        Ok(o) => o,
+        Err(e) => {
+            panic!("unable to create options for sqlite connection {:?}", e)
+        }
+    };
+
+    let db = match SqlitePool::connect_with(options.create_if_missing(true)).await {
+        Ok(d) => d,
+        Err(e) => {
+            panic!("unable to connect to sqlite database {:?}", e)
+        }
+    };
+
+    // run the migrations
+    include_dir!("./migrations");
+    match sqlx::migrate!("./migrations").run(&db).await {
+        Ok(_) => {}
+        Err(e) => {
+            panic!("error while running migrations {:?}", e)
+        }
     }
 
     // run through all the files and open a single connection to the data sources, was meant to
     // hold a websocket connection
-    let mut data_source_channels: DataSources = DataSources::default();
+    let data_source_channels: DataSources = DataSources::default();
     for file in &config_file.files {
         if file.data_source_id.is_some() {
             data_source_thread(data_source_channels.clone(), &file.data_source_id).await;
@@ -103,21 +135,14 @@ async fn main() {
         }
     }
 
-    let mut functions: Option<Plugin> = None;
+    let mut plugin: Option<Plugin> = None;
+    match cli.plugin_path {
+        None => {}
+        Some(p) => unsafe {
+            let external_functions = Plugin::new(p).expect("Plugin loading failed");
 
-    unsafe {
-        let mut external_functions =
-            Plugin::new("/Users/darrjw/IdeaProjects/jester-isu/target/debug/libjester_isu.so")
-                .expect("Plugin loading failed");
-
-        functions = Some(external_functions)
-    }
-
-    let plugin = match functions {
-        None => {
-            panic!("unable to load plugin")
-        }
-        Some(p) => p,
+            plugin = Some(external_functions)
+        },
     };
 
     let plugin = Arc::new(RwLock::new(plugin));
@@ -126,10 +151,13 @@ async fn main() {
     // the files
     let mut handles = vec![];
     for file in config_file.files {
+        // all cheap clones of pointers to main systems, setups
         let channels = data_source_channels.clone();
         let inner_plugin = plugin.clone();
+        let db = db.clone();
 
-        let thread = tokio::spawn(async move { watch_file(file, channels, inner_plugin).await });
+        let thread =
+            tokio::spawn(async move { watch_file(file, channels, inner_plugin, db).await });
 
         handles.push(thread);
     }
@@ -144,10 +172,10 @@ async fn main() {
     for result in results {
         match result {
             Ok(_) => {}
-            Err(e) => println!("error in spawned watcher {:?}", e),
+            Err(e) => error!("error in spawned watcher {:?}", e),
         }
     }
-    println!("Directories listed in configuration file no longer exist or cannot be listened to, exiting..");
+    warn!("Directories listed in configuration file no longer exist or cannot be listened to, exiting..");
     std::process::exit(0)
 }
 
@@ -181,20 +209,160 @@ async fn data_source_thread(data_sources: DataSources, data_source_id: &Option<S
     };
 }
 
+#[derive(sqlx::FromRow, Debug)]
+struct DBFile {
+    pattern: String, //pattern's are unique as in they are always relative paths from jester
+    checksum: Option<u32>,
+    created_at: String,
+    transmitted_at: Option<String>,
+}
+
 async fn watch_file(
     file: FileConfig,
     data_sources: DataSources,
-    plugin: Arc<RwLock<Plugin>>,
+    plugin: Arc<RwLock<Option<Plugin>>>,
+    db: Pool<Sqlite>,
 ) -> Result<(), WatcherError> {
     // for each file, run the glob matching and act on the results - eventually we can make this async
     // but since most OSes don't offer an async file event system, it's not the end of the world
     // match the pattern included by the user
-    for entry in glob(file.path_pattern.as_str())? {
-        match entry {
-            Ok(path) => println!("{:?}", path.display()),
-            Err(e) => println!("{:?}", e),
-        }
-    }
+    loop {
+        for entry in glob(file.path_pattern.as_str())? {
+            let path = match entry {
+                Ok(p) => p,
+                Err(e) => return Err(WatcherError::GlobError(e)),
+            };
 
-    Ok(())
+            // we will need the checksum at some point
+            let f = File::open(&path)?;
+            let checksum = adler32(BufReader::new(f))?;
+
+            // TODO: update this query with an optional time to make subsequent queries after we've been running faster
+            match sqlx::query_as::<_, DBFile>("SELECT * FROM files WHERE pattern = ? LIMIT 1")
+                .bind(&path.to_str().unwrap())
+                .fetch_one(&db)
+                .await
+            {
+                Ok(f) => {
+                    // if the file exists in the db and has a transmitted at date we need to check the last modified date and make
+                    // sure we shouldn't resend it TODO: clarify this functionality and modify to handle files where we stopped halfway
+                    match f.transmitted_at {
+                        None => {} // if not transmitted we assume it needs to be sent to DeepLynx
+                        Some(transmitted_at) => {
+                            let last_modified_at: DateTime<Utc> =
+                                fs::metadata(&path)?.modified()?.into();
+                            let transmitted_at =
+                                DateTime::parse_from_rfc3339(transmitted_at.as_str())?;
+
+                            if last_modified_at > transmitted_at {
+                                // we should double check the checksum of the file in insure it really is different
+                                // we're using adler here because it's great for quick data integrity checks and
+                                // that's all we need really, if it's the same, skip the file
+
+                                match f.checksum {
+                                    None => {}
+                                    Some(c) => {
+                                        if c == checksum {
+                                            continue;
+                                        }
+                                    }
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    match e {
+                        RowNotFound => {
+                            // if it's not found, enter it in the db
+                            match sqlx::query("INSERT INTO files(pattern, created_at) VALUES (?,?)")
+                                .bind(&path.to_str().unwrap())
+                                .bind(Utc::now().to_rfc3339())
+                                .execute(&db)
+                                .await
+                            {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!(
+                        "unable to update the database with initial record for {}: {:?}",
+                        path.to_str().unwrap(),
+                        e
+                    )
+                                }
+                            }
+                        }
+                        _ => {
+                            error!("unable to fetch files from db {:?}", e);
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            // now that we know we don't have this file in the db, or that it needs to be reprocessed - do so
+            if plugin.read().await.is_some() {
+                // TODO: hook up plugin specific processing
+                continue;
+            }
+
+            // fall back to the default behavior of simply sending the file to DeepLynx, we do this
+            // by sending a message to the relevant data sources with the file's path
+            match &file.data_source_id {
+                None => {}
+                Some(id) => match data_sources.write().await.get(id) {
+                    None => {}
+                    Some(channel) => {
+                        let path = path.clone();
+                        match channel.send(DataSourceMessage::File(path)) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("error sending file message to DataSource {:?}", e)
+                            }
+                        }
+                    }
+                },
+            }
+
+            match &file.metadata_data_source_id {
+                None => {}
+                Some(id) => match data_sources.write().await.get(id) {
+                    None => {}
+                    Some(channel) => {
+                        let path = path.clone();
+                        match channel.send(DataSourceMessage::File(path)) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("error sending file message to DataSource {:?}", e)
+                            }
+                        };
+                    }
+                },
+            }
+
+            // update the file setting its transmitted time
+            // capture any errors in the db if the transmission runs into issues
+            match sqlx::query("UPDATE files SET transmitted_at = ?, checksum = ? WHERE pattern = ?")
+                .bind(Utc::now().to_rfc3339())
+                .bind(checksum)
+                .bind(&path.to_str().unwrap())
+                .execute(&db)
+                .await
+            {
+                Ok(_) => {
+                    info!("file at {} transmitted to DeepLynx", path.to_str().unwrap())
+                }
+                Err(e) => {
+                    error!(
+                        "unable to update the database with transmit time for {}: {:?}",
+                        path.to_str().unwrap(),
+                        e
+                    )
+                }
+            }
+        }
+
+        sleep(Duration::from_secs(1)).await
+    }
 }

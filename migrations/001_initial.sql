@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS files (name text, pattern text, checksum integer, created_at text, transmitted_at text, errors text);

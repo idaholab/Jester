@@ -2,6 +2,7 @@ pub mod errors;
 
 use crate::errors::ProcessorError;
 use std::io::Read;
+use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
 
 pub static CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -9,7 +10,7 @@ pub static RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 
 #[derive(Debug)]
 pub enum DataSourceMessage {
-    File(String),
+    File(PathBuf),
     Test(String),
     Data(Vec<u8>),
     Close,

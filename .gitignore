@@ -3,3 +3,4 @@
 *.iml
 config.yml
 /sample_dir/
+/.jester.db
