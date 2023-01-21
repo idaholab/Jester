@@ -1,5 +1,6 @@
 extern crate core;
 
+mod errors;
 mod plugin;
 
 use clap::Parser;
@@ -7,14 +8,16 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::from_reader;
 use std::collections::HashMap;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 use tokio::sync::RwLock;
 
 use crate::plugin::Plugin;
-use jester_core::{DataSourceMessage, ProcessorReader};
+use jester_core::DataSourceMessage;
 use std::alloc::System;
-use std::os::unix::thread;
+
+use crate::errors::WatcherError;
+use glob::glob;
 
 // needed to make sure we don't accidentally free a string in our plugin system
 #[global_allocator]
@@ -34,21 +37,15 @@ struct Config {
     api_key: String,
     api_secret: String,
     deep_lynx_url: String,
-    directories: Vec<DirectoryConfig>,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct DirectoryConfig {
-    path: String,
     files: Vec<FileConfig>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FileConfig {
-    pattern: String,
+    path_pattern: String,
     container_id: String,
-    data_source_id: String,
-    metadata_data_source_id: String,
+    data_source_id: Option<String>,
+    metadata_data_source_id: Option<String>,
 }
 
 type DataSources = Arc<RwLock<HashMap<String, mpsc::SyncSender<DataSourceMessage>>>>;
@@ -88,7 +85,7 @@ async fn main() {
         Some(p) => p,
     };
 
-    if config_file.directories.len() <= 0 {
+    if config_file.files.len() <= 0 {
         println!("Must provide directories to monitor");
         std::process::exit(1)
     }
@@ -96,9 +93,13 @@ async fn main() {
     // run through all the files and open a single connection to the data sources, was meant to
     // hold a websocket connection
     let mut data_source_channels: DataSources = DataSources::default();
-    for directory in &config_file.directories {
-        for file in &directory.files {
+    for file in &config_file.files {
+        if file.data_source_id.is_some() {
             data_source_thread(data_source_channels.clone(), &file.data_source_id).await;
+        }
+
+        if file.metadata_data_source_id.is_some() {
+            data_source_thread(data_source_channels.clone(), &file.metadata_data_source_id).await;
         }
     }
 
@@ -112,7 +113,7 @@ async fn main() {
         functions = Some(external_functions)
     }
 
-    let mut plugin = match functions {
+    let plugin = match functions {
         None => {
             panic!("unable to load plugin")
         }
@@ -124,18 +125,11 @@ async fn main() {
     // for each directory start a file watcher - we start these in threads because we'll be tailing
     // the files
     let mut handles = vec![];
-    for directory in config_file.directories {
+    for file in config_file.files {
         let channels = data_source_channels.clone();
         let inner_plugin = plugin.clone();
-        let thread = tokio::spawn(async move {
-            for (_, chan) in channels.read().await.iter() {
-                inner_plugin.clone().read().await.process(
-                    ProcessorReader::new(),
-                    chan.clone(),
-                    chan.clone(),
-                );
-            }
-        });
+
+        let thread = tokio::spawn(async move { watch_file(file, channels, inner_plugin).await });
 
         handles.push(thread);
     }
@@ -157,27 +151,50 @@ async fn main() {
     std::process::exit(0)
 }
 
-async fn data_source_thread(data_sources: DataSources, data_source_id: &String) {
-    if !data_sources
-        .read()
-        .await
-        .contains_key(data_source_id.as_str())
-    {
-        let (tx, mut rx) = mpsc::sync_channel(2048);
-        tokio::spawn(async move {
-            while let Ok(message) = rx.recv() {
-                println!("{:?}", message);
-                // BODY WHERE WE SEND THINGS OR ACT ON DATA SOURCE MESSAGES
-            }
-        });
+async fn data_source_thread(data_sources: DataSources, data_source_id: &Option<String>) {
+    match data_source_id {
+        None => {}
+        Some(data_source_id) => {
+            if !data_sources
+                .read()
+                .await
+                .contains_key(data_source_id.as_str())
+            {
+                let (tx, rx) = mpsc::sync_channel(2048);
+                tokio::spawn(async move {
+                    while let Ok(message) = rx.recv() {
+                        println!("{:?}", message);
+                        // BODY WHERE WE SEND THINGS OR ACT ON DATA SOURCE MESSAGES
+                    }
+                });
 
-        match data_sources
-            .write()
-            .await
-            .insert(data_source_id.clone(), tx)
-        {
-            Some(_) => {}
-            None => {}
+                match data_sources
+                    .write()
+                    .await
+                    .insert(data_source_id.clone(), tx)
+                {
+                    Some(_) => {}
+                    None => {}
+                }
+            }
+        }
+    };
+}
+
+async fn watch_file(
+    file: FileConfig,
+    data_sources: DataSources,
+    plugin: Arc<RwLock<Plugin>>,
+) -> Result<(), WatcherError> {
+    // for each file, run the glob matching and act on the results - eventually we can make this async
+    // but since most OSes don't offer an async file event system, it's not the end of the world
+    // match the pattern included by the user
+    for entry in glob(file.path_pattern.as_str())? {
+        match entry {
+            Ok(path) => println!("{:?}", path.display()),
+            Err(e) => println!("{:?}", e),
         }
     }
+
+    Ok(())
 }

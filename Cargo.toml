@@ -10,12 +10,14 @@ clap = { version = "4.0.17", features = ["derive"] }
 wild = "2.1.0"
 serde = { version = "1.0.145", features = ["derive"]}
 serde_yaml = "0.9"
-notify-debouncer-mini = { version = "*", default-features = false }
-notify = {version = "5.0.0", features = ["serde"]}
 tokio = { version = "1", features = ["full", "io-util", "fs"] }
 rustc_version = "0.4.0"
 jester_core = { path = "./jester_core"}
 libloading = "0.7.4"
+futures = "0.3.25"
+glob = "0.3.1"
+thiserror = "1.0.38"
+
 
 [workspace]
 members = ['jester_core']
