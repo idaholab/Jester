@@ -128,11 +128,21 @@ async fn main() {
     let data_source_channels: DataSources = DataSources::default();
     for file in &config_file.files {
         if file.data_source_id.is_some() {
-            data_source_thread(data_source_channels.clone(), &file.data_source_id).await;
+            data_source_thread(
+                data_source_channels.clone(),
+                &file.data_source_id,
+                &file.container_id.as_str(),
+            )
+            .await;
         }
 
         if file.metadata_data_source_id.is_some() {
-            data_source_thread(data_source_channels.clone(), &file.metadata_data_source_id).await;
+            data_source_thread(
+                data_source_channels.clone(),
+                &file.metadata_data_source_id,
+                &file.container_id.as_str(),
+            )
+            .await;
         }
     }
 
@@ -180,7 +190,11 @@ async fn main() {
     std::process::exit(0)
 }
 
-async fn data_source_thread(data_sources: DataSources, data_source_id: &Option<String>) {
+async fn data_source_thread(
+    data_sources: DataSources,
+    data_source_id: &Option<String>,
+    container_id: &str,
+) {
     match data_source_id {
         None => {}
         Some(data_source_id) => {
