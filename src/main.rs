@@ -222,8 +222,17 @@ async fn data_source_thread(
                     while let Some(message) = rx.recv().await {
                         match message {
                             DataSourceMessage::File(path) => {
-                                api.import(container_id, data_source_id, Some(path), None)
-                                    .await;
+                                match api
+                                    .import(container_id, data_source_id, Some(path), None)
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        debug!("file successfully uploaded to deeplynx")
+                                    }
+                                    Err(e) => {
+                                        error!("unable to upload file to DeepLynx {:?}", e)
+                                    }
+                                };
                                 ();
                             }
                             DataSourceMessage::Test(_) => {}
