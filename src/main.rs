@@ -21,7 +21,6 @@ use std::alloc::System;
 use std::fs;
 use std::io::BufReader;
 use std::str::FromStr;
-use std::sync::mpsc::{SendError, SyncSender};
 use std::time::Duration;
 
 use crate::errors::WatcherError;
