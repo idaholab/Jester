@@ -1,7 +1,7 @@
-api_key: ""
-api_secret: ""
-deep_lynx_url: ""
+api_key: "NTBjNzA3MjAtMGZmYi00ZGQ1LTkyM2QtNjc4MDVlMWIxMDI3"
+api_secret: "MDZhMGIyODUtYWFlYi00NDRkLTlhNmMtYzg1MjdiY2I1YTJj"
+deep_lynx_url: "http://localhost:8090"
 files:
-  - data_source_id: 1
+  - data_source_id: 469
     container_id: 1
     path_pattern: "./sample_dir/*.csv"

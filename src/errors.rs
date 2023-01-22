@@ -5,7 +5,7 @@ use thiserror::Error;
 pub enum WatcherError {
     #[error("unknown processor error")]
     Unknown,
-    #[error("pattenr matching error")]
+    #[error("pattern matching error")]
     PatternError(#[from] glob::PatternError),
     #[error("glob matching error")]
     GlobError(#[from] glob::GlobError),

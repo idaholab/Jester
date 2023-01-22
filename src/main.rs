@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 use crate::plugin::Plugin;
 use adler::adler32;
 use chrono::{DateTime, Utc};
+use deeplynx_rust_sdk::DeepLynxAPI;
 use jester_core::DataSourceMessage;
 use std::alloc::System;
 use std::fs;
@@ -32,6 +33,7 @@ use sqlx::{Pool, Sqlite, SqlitePool};
 use env_logger;
 use include_dir::include_dir;
 use sqlx::Error::RowNotFound;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::time::sleep;
 
 // needed to make sure we don't accidentally free a string in our plugin system
@@ -58,12 +60,12 @@ struct Config {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FileConfig {
     path_pattern: String,
-    container_id: String,
-    data_source_id: Option<String>,
-    metadata_data_source_id: Option<String>,
+    container_id: u64,
+    data_source_id: Option<u64>,
+    metadata_data_source_id: Option<u64>,
 }
 
-type DataSources = Arc<RwLock<HashMap<String, SyncSender<DataSourceMessage>>>>;
+type DataSources = Arc<RwLock<HashMap<u64, UnboundedSender<DataSourceMessage>>>>;
 
 #[tokio::main]
 async fn main() {
@@ -123,6 +125,19 @@ async fn main() {
         }
     }
 
+    let mut client = match DeepLynxAPI::new(
+        config_file.deep_lynx_url,
+        Some(config_file.api_key),
+        Some(config_file.api_secret),
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            panic!("error while initializing DeepLynx API client: {:?}", e);
+        }
+    };
+
     // run through all the files and open a single connection to the data sources, was meant to
     // hold a websocket connection
     let data_source_channels: DataSources = DataSources::default();
@@ -130,8 +145,9 @@ async fn main() {
         if file.data_source_id.is_some() {
             data_source_thread(
                 data_source_channels.clone(),
-                &file.data_source_id,
-                &file.container_id.as_str(),
+                client.clone(),
+                file.data_source_id.clone(),
+                file.container_id,
             )
             .await;
         }
@@ -139,8 +155,9 @@ async fn main() {
         if file.metadata_data_source_id.is_some() {
             data_source_thread(
                 data_source_channels.clone(),
-                &file.metadata_data_source_id,
-                &file.container_id.as_str(),
+                client.clone(),
+                file.metadata_data_source_id.clone(),
+                file.container_id,
             )
             .await;
         }
@@ -192,22 +209,27 @@ async fn main() {
 
 async fn data_source_thread(
     data_sources: DataSources,
-    data_source_id: &Option<String>,
-    container_id: &str,
+    mut api: DeepLynxAPI,
+    data_source_id: Option<u64>,
+    container_id: u64,
 ) {
     match data_source_id {
         None => {}
         Some(data_source_id) => {
-            if !data_sources
-                .read()
-                .await
-                .contains_key(data_source_id.as_str())
-            {
-                let (tx, rx) = mpsc::sync_channel(2048);
+            if !data_sources.write().await.contains_key(&data_source_id) {
+                let (tx, mut rx) = unbounded_channel();
                 tokio::spawn(async move {
-                    while let Ok(message) = rx.recv() {
-                        println!("{:?}", message);
-                        // BODY WHERE WE SEND THINGS OR ACT ON DATA SOURCE MESSAGES
+                    while let Some(message) = rx.recv().await {
+                        match message {
+                            DataSourceMessage::File(path) => {
+                                api.import(container_id, data_source_id, Some(path), None)
+                                    .await;
+                                ();
+                            }
+                            DataSourceMessage::Test(_) => {}
+                            DataSourceMessage::Data(_) => {}
+                            DataSourceMessage::Close => {}
+                        }
                     }
                 });
 
