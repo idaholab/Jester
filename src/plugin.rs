@@ -32,6 +32,9 @@ pub struct Plugin {
 unsafe impl Send for Plugin {}
 unsafe impl Sync for Plugin {}
 
+// Plugin represents the external library loaded at runtime and creates and internal proxy around it
+// all interaction with the library should be wrapped by this plugin implementation so as to make sure
+// the library always outlives what's calling it and it doesn't get accidentally freed
 impl Plugin {
     pub unsafe fn new<P: AsRef<OsStr>>(library_path: P) -> Result<Plugin, io::Error> {
         let library = match Library::new(library_path) {
@@ -81,6 +84,7 @@ impl Plugin {
     }
 }
 
+// Copy in the plugin registration code
 struct PluginRegistrar {
     functions: Option<PluginProxy>,
     lib: Rc<Library>,

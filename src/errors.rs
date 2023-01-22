@@ -1,6 +1,8 @@
 use std::io;
 use thiserror::Error;
 
+// Project specific errors and wrappers of other libraries errors so we can always return ours but
+// still be able to use ? notation
 #[derive(Error, Debug)]
 pub enum WatcherError {
     #[error("unknown processor error")]

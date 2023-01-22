@@ -11,11 +11,13 @@ pub static RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 #[derive(Debug)]
 pub enum DataSourceMessage {
     File(PathBuf),
-    Test(String),
     Data(Vec<u8>),
     Close,
 }
 
+// because we can't use traits in the FFI's function arguments, we need to wrap the internal Read
+// and make it a concrete type - this will actually serve our goals as we are going to setup our
+// reader to read from an async channel PROBABLY
 pub struct ProcessorReader {}
 
 impl ProcessorReader {
@@ -30,6 +32,9 @@ impl Read for ProcessorReader {
     }
 }
 
+// this represents the public interface a plugin must satisfy and provide via dynamic library
+// THIS IS STILL UNDER CONSTRUCTION WE HAVE NOT FINALIZED THIS TRAIT AND THE CONTRACT IT MAKES
+// BETWEEN JESTER AND YOUR LIBRARY USE AT YOUR OWN RISK
 pub trait Processor {
     fn process(
         &self,
