@@ -131,11 +131,13 @@ async fn main() {
     env_logger::init();
 
     let cli: Arguments = Arguments::parse();
-    // TODO: eventually add some default behavior, like looking for the config file a .config in the root
+
     let config_file_path = match cli.config_file {
         None => {
-            error!("You must provide a configuration file path");
-            std::process::exit(1);
+            let mut p = PathBuf::new();
+            p.push(".config.yml");
+
+            p
         }
         Some(p) => p,
     };

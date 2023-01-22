@@ -4,3 +4,4 @@
 config.yml
 /sample_dir/
 /.jester.db
+.config.yml

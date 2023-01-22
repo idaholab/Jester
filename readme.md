@@ -23,7 +23,7 @@ Options:
   -V, --version                    Print version
 
 ```
-Running Jester is very simple and requires only that you provide it a configuration file. You may also optionally provide it a plugin, in the form of a Rust compiled `.so`. More information about that can be found in the code and `jester_core` library.
+Running Jester is very simple and requires only that you provide it a configuration file - either through the `-c` option or by placing a file called `.config.yml` in the same directory as Jester. You may also optionally provide it a plugin, in the form of a Rust compiled `.so`. More information about that can be found in the code and `jester_core` library.
 
 ### Configuration File
 Included in this repository is a sample configuration - `config.sample.yml`. Jester expects your configuration file to follow the same format and be a YAML document. In order to make this more convenient to understand, we are including the sample YAML file here in this readme.
