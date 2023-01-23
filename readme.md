@@ -55,3 +55,6 @@ In case of a plugin not being supplied Jester will do the following with all fil
 Jester ships with the ability to accept project or file specific plugins in the form of Rust compiled dynamically linked libraries. When a path to this dynamic library is provided when running Jester, it will attempt to load that library and use it to process your watched file instead of falling back on the default behavior (explained above).
 
 More information about how to build these plugins can be found in the `jester_core` folder and in code level comments. We will update this document with examples soon.
+
+### Webserver
+Jester ships with an an optional internal webserver. To enable it simply pass the `-w` flag and navigate to `localhost:3030`. This simple web interface will help you monitor Jester's status.

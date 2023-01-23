@@ -59,6 +59,7 @@ extern crate core;
 
 mod errors;
 mod plugin;
+mod templates;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -86,11 +87,15 @@ use log::{debug, error, info};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Pool, Sqlite, SqlitePool};
 
+use crate::templates::MAIN_PAGE_TEMPLATE;
 use env_logger;
+use handlebars::Handlebars;
 use include_dir::include_dir;
+use serde_json::{json, Value};
 use sqlx::Error::RowNotFound;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::time::sleep;
+use warp::Filter;
 
 // needed to make sure we don't accidentally free a string in our plugin system
 #[global_allocator]
@@ -103,6 +108,8 @@ struct Arguments {
     config_file: Option<PathBuf>,
     #[clap(short, long)]
     plugin_path: Option<String>,
+    #[clap(short, long, action)]
+    web_server: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -125,6 +132,22 @@ struct FileConfig {
 // source - the key is (container_id, data_source_id) since data_source_id could be shared across
 // different containers
 type DataSources = Arc<RwLock<HashMap<(u64, u64), UnboundedSender<DataSourceMessage>>>>;
+
+// this is for our simple webserver template engine code and helper for the endpoint
+struct WithTemplate<T: Serialize> {
+    name: &'static str,
+    value: T,
+}
+
+fn render<T>(template: WithTemplate<T>, hbs: Arc<Handlebars<'_>>) -> impl warp::Reply
+where
+    T: Serialize,
+{
+    let render = hbs
+        .render(template.name, &template.value)
+        .unwrap_or_else(|err| err.to_string());
+    warp::reply::html(render)
+}
 
 #[tokio::main]
 async fn main() {
@@ -258,6 +281,43 @@ async fn main() {
         handles.push(thread);
     }
 
+    // run our webserver as long as they've turned it on
+    if cli.web_server {
+        let mut hb = Handlebars::new();
+        // register the template
+        hb.register_template_string("main.html", MAIN_PAGE_TEMPLATE)
+            .unwrap();
+
+        // Turn Handlebars instance into a Filter so we can combine it
+        // easily with others...
+        let hb = Arc::new(hb);
+
+        // Create a reusable closure to render template
+        let handlebars = move |with_template| render(with_template, hb.clone());
+        let db_filter = warp::any().map(move || db.clone());
+
+        let route = warp::get()
+            .and(warp::path::end())
+            .and(db_filter)
+            .and_then(|pool| async move {
+                Ok(sqlx::query_as::<_, DBFile>("SELECT * FROM files")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap()) as Result<Vec<DBFile>, warp::reject::Rejection>
+            })
+            .map(|files| {
+                println!("{}", json!(files));
+                WithTemplate {
+                    name: "main.html",
+                    value: json!(MainPageTemplate { files }),
+                }
+            })
+            .map(handlebars);
+
+        // we only serve on the local machine, don't want this exposed outside of it typically
+        warp::serve(route).run(([127, 0, 0, 1], 3030)).await;
+    }
+
     // if all the directory threads finish it means the directory's no longer exist and the program
     // should be exited with an error
     let mut results = vec![];
@@ -332,13 +392,18 @@ async fn data_source_thread(
 }
 
 // this represents the file table in the embedded database
-#[derive(sqlx::FromRow, Debug)]
+#[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
 struct DBFile {
     pattern: String, //pattern's are unique as in they are always relative paths from jester
     container_id: String,
     checksum: Option<u32>,
     created_at: String,
     transmitted_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MainPageTemplate {
+    files: Vec<DBFile>,
 }
 
 // watch_file is the meat of Jester - this is being run in a thread, so feel free to block or be
