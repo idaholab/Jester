@@ -305,12 +305,9 @@ async fn main() {
                     .await
                     .unwrap()) as Result<Vec<DBFile>, warp::reject::Rejection>
             })
-            .map(|files| {
-                println!("{}", json!(files));
-                WithTemplate {
-                    name: "main.html",
-                    value: json!(MainPageTemplate { files }),
-                }
+            .map(|files| WithTemplate {
+                name: "main.html",
+                value: json!(MainPageTemplate { files }),
             })
             .map(handlebars);
 
