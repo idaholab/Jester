@@ -361,7 +361,7 @@ async fn data_source_thread(
                                     .await
                                 {
                                     Ok(_) => {
-                                        debug!("file successfully uploaded to deeplynx")
+                                        debug!("file successfully uploaded to DeepLynx")
                                     }
                                     Err(e) => {
                                         error!("unable to upload file to DeepLynx {:?}", e)
