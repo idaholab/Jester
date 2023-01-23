@@ -416,8 +416,9 @@ async fn watch_file(
     // for each file, run the glob matching and act on the results - eventually we can make this async
     // but since most OSes don't offer an async file event system, it's not the end of the world
     // match the pattern included by the user
+    info!("starting watch {}", file.path_pattern);
     loop {
-        info!("starting watch on {}", file.path_pattern);
+        debug!("watching {}", file.path_pattern);
         for entry in glob(file.path_pattern.as_str())? {
             let path = match entry {
                 Ok(p) => p,

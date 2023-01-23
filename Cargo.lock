@@ -304,7 +304,6 @@ dependencies = [
  "jwt",
  "reqwest",
  "serde",
- "serde_yaml",
  "thiserror",
  "tokio",
  "tokio-util",
