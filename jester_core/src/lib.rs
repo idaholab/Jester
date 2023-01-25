@@ -1,6 +1,7 @@
 pub mod errors;
 
 use crate::errors::ProcessorError;
+use sqlx::{Pool, Sqlite};
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
@@ -15,32 +16,16 @@ pub enum DataSourceMessage {
     Close,
 }
 
-// because we can't use traits in the FFI's function arguments, we need to wrap the internal Read
-// and make it a concrete type - this will actually serve our goals as we are going to setup our
-// reader to read from an async channel PROBABLY
-pub struct ProcessorReader {}
-
-impl ProcessorReader {
-    pub fn new() -> ProcessorReader {
-        ProcessorReader {}
-    }
-}
-
-impl Read for ProcessorReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        Ok(2)
-    }
-}
-
 // this represents the public interface a plugin must satisfy and provide via dynamic library
 // THIS IS STILL UNDER CONSTRUCTION WE HAVE NOT FINALIZED THIS TRAIT AND THE CONTRACT IT MAKES
 // BETWEEN JESTER AND YOUR LIBRARY USE AT YOUR OWN RISK
 pub trait Processor {
     fn process(
         &self,
-        input: ProcessorReader,
-        timeseries_chan: SyncSender<DataSourceMessage>,
-        metadata_chan: SyncSender<DataSourceMessage>,
+        file: PathBuf,
+        db: Pool<Sqlite>,
+        timeseries_chan: Option<SyncSender<DataSourceMessage>>,
+        graph_chan: Option<SyncSender<DataSourceMessage>>,
     ) -> Result<(), ProcessorError>;
 }
 

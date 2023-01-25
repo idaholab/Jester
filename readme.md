@@ -54,6 +54,40 @@ In case of a plugin not being supplied Jester will do the following with all fil
 ### Project/File Plugins
 Jester ships with the ability to accept project or file specific plugins in the form of Rust compiled dynamically linked libraries. When a path to this dynamic library is provided when running Jester, it will attempt to load that library and use it to process your watched file instead of falling back on the default behavior (explained above).
 
+Plugins must be compiled Rust `cdylib`. They must satisfy the `Processor` trait declared in `jester_core`. In order to make this as easy to use as possible, the code below is a sample of a library which when compiled can be included in Jester's plugin path.
+```rust
+use jester_core::errors::ProcessorError;
+use jester_core::DataSourceMessage;
+use sqlx::{Pool, Sqlite};
+use std::path::PathBuf;
+use std::sync::mpsc::SyncSender;
+
+pub struct YourProcessor;
+
+// implement the Processor traite
+impl jester_core::Processor for YourProcessor {
+    fn process(
+        &self,
+        file: PathBuf,
+        db: Pool<Sqlite>,
+        timeseries_chan: Option<SyncSender<DataSourceMessage>>,
+        graph_chan: Option<SyncSender<DataSourceMessage>>,
+    ) -> Result<(), ProcessorError> {
+        // Your code implementation goes here
+    }
+}
+
+// You must export the plugin and then call the registrar functions so we can actually hook into things
+jester_core::export_plugin!(register);
+
+extern "C" fn register(registrar: &mut dyn jester_core::PluginRegistrar) {
+    registrar.register_function(Box::new(YourProcessor));
+}
+
+```
+
+You can also find an example [here](https://github.inl.gov/Digital-Engineering/Jester-AGN).
+
 More information about how to build these plugins can be found in the `jester_core` folder and in code level comments. We will update this document with examples soon.
 
 ### Webserver
