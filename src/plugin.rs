@@ -6,7 +6,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc::SyncSender;
+use tokio::sync::mpsc::UnboundedSender;
 
 /// A proxy object which wraps a [`Processor`] and makes sure it can't outlive
 /// the library it came from.
@@ -20,8 +20,8 @@ impl Processor for PluginProxy {
         &self,
         file: PathBuf,
         db: Pool<Sqlite>,
-        timeseries_chan: Option<SyncSender<DataSourceMessage>>,
-        graph_chan: Option<SyncSender<DataSourceMessage>>,
+        timeseries_chan: Option<UnboundedSender<DataSourceMessage>>,
+        graph_chan: Option<UnboundedSender<DataSourceMessage>>,
     ) -> Result<(), ProcessorError> {
         self.function.process(file, db, timeseries_chan, graph_chan)
     }
@@ -80,8 +80,8 @@ impl Plugin {
         &self,
         file: PathBuf,
         db: Pool<Sqlite>,
-        timeseries_chan: Option<SyncSender<DataSourceMessage>>,
-        graph_chan: Option<SyncSender<DataSourceMessage>>,
+        timeseries_chan: Option<UnboundedSender<DataSourceMessage>>,
+        graph_chan: Option<UnboundedSender<DataSourceMessage>>,
     ) -> Result<(), ProcessorError> {
         self.functions
             .process(file, db, timeseries_chan, graph_chan)

@@ -60,18 +60,18 @@ use jester_core::errors::ProcessorError;
 use jester_core::DataSourceMessage;
 use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
-use std::sync::mpsc::SyncSender;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub struct YourProcessor;
 
-// implement the Processor traite
+// implement the Processor trait
 impl jester_core::Processor for YourProcessor {
     fn process(
         &self,
         file: PathBuf,
         db: Pool<Sqlite>,
-        timeseries_chan: Option<SyncSender<DataSourceMessage>>,
-        graph_chan: Option<SyncSender<DataSourceMessage>>,
+        timeseries_chan: Option<UnboundedSender<DataSourceMessage>>,
+        graph_chan: Option<UnboundedSender<DataSourceMessage>>,
     ) -> Result<(), ProcessorError> {
         // Your code implementation goes here
     }

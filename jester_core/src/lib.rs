@@ -5,6 +5,7 @@ use sqlx::{Pool, Sqlite};
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub static CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static RUSTC_VERSION: &str = env!("RUSTC_VERSION");
@@ -24,8 +25,8 @@ pub trait Processor {
         &self,
         file: PathBuf,
         db: Pool<Sqlite>,
-        timeseries_chan: Option<SyncSender<DataSourceMessage>>,
-        graph_chan: Option<SyncSender<DataSourceMessage>>,
+        timeseries_chan: Option<UnboundedSender<DataSourceMessage>>,
+        graph_chan: Option<UnboundedSender<DataSourceMessage>>,
     ) -> Result<(), ProcessorError>;
 }
 
