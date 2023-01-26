@@ -297,6 +297,7 @@ dependencies = [
 [[package]]
 name = "deeplynx_rust_sdk"
 version = "0.0.42"
+source = "git+https://github.inl.gov/Digital-Engineering/deeplynx-rust-sdk#17408802372012f1c19556f29d4b1ee33135939d"
 dependencies = [
  "chrono",
  "futures",
