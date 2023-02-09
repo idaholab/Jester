@@ -57,6 +57,7 @@
 /// More information about how to build these plugins can be found in the `jester_core` folder and in code level comments. We will update this document with examples soon.
 extern crate core;
 
+mod deep_lynx;
 mod errors;
 mod plugin;
 mod templates;
@@ -73,7 +74,6 @@ use tokio::sync::RwLock;
 use crate::plugin::Plugin;
 use adler::adler32;
 use chrono::{DateTime, Utc};
-use deeplynx_rust_sdk::DeepLynxAPI;
 use jester_core::DataSourceMessage;
 use std::alloc::System;
 use std::fs;
@@ -87,6 +87,7 @@ use log::{debug, error, info};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Pool, Sqlite, SqlitePool};
 
+use crate::deep_lynx::DeepLynxAPI;
 use crate::templates::MAIN_PAGE_TEMPLATE;
 use env_logger;
 use handlebars::Handlebars;
@@ -624,7 +625,7 @@ async fn watch_file(
                 // yes this is duplicated code, so we can pull it out into a function at some point -
                 // I just needed something working now
                 match sqlx::query(
-                    "UPDATE files SET transmitted_at = ?, checksum = ? WHERE pattern = ? AND container ?",
+                    "UPDATE files SET transmitted_at = ?, checksum = ? WHERE pattern = ? AND container_id = ?",
                 )
                     .bind(Utc::now().to_rfc3339())
                     .bind(checksum)

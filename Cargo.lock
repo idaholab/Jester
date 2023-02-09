@@ -295,21 +295,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deeplynx_rust_sdk"
-version = "0.0.42"
-dependencies = [
- "chrono",
- "futures",
- "json",
- "jwt",
- "reqwest",
- "serde",
- "thiserror",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -867,15 +852,17 @@ dependencies = [
  "adler",
  "chrono",
  "clap",
- "deeplynx_rust_sdk",
  "env_logger",
  "futures",
  "glob",
  "handlebars",
  "include_dir",
  "jester_core",
+ "json",
+ "jwt",
  "libloading",
  "log",
+ "reqwest",
  "rustc_version",
  "serde",
  "serde_json",
@@ -883,6 +870,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tokio-util",
  "warp",
  "wild",
 ]
