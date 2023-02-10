@@ -92,7 +92,6 @@ use crate::templates::MAIN_PAGE_TEMPLATE;
 use env_logger;
 use handlebars::Handlebars;
 use include_dir::include_dir;
-use jester_core::errors::ProcessorError;
 use serde_json::json;
 use sqlx::Error::RowNotFound;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
