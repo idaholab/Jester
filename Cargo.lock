@@ -2522,6 +2522,8 @@ dependencies = [
  "log 0.4.17",
  "once_cell",
  "rustls",
+ "serde",
+ "serde_json",
  "url 2.3.1",
  "webpki",
  "webpki-roots",

@@ -164,7 +164,10 @@ impl DeepLynxAPI {
 
         match data {
             None => {}
-            Some(d) => {}
+            Some(d) => {
+                agent.send_json(d)?;
+                return Ok(());
+            }
         }
 
         Err(MissingFields(None))
