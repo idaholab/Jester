@@ -16,6 +16,10 @@ pub struct PluginProxy {
 }
 
 impl Processor for PluginProxy {
+    fn init(&self) -> Result<(), ProcessorError> {
+        self.function.init()
+    }
+
     fn process(
         &self,
         file: PathBuf,
@@ -74,6 +78,10 @@ impl Plugin {
             functions: registrar.functions.unwrap(),
             library,
         })
+    }
+
+    pub fn init(&self) -> Result<(), ProcessorError> {
+        self.functions.init()
     }
 
     pub fn process(

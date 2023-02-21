@@ -21,6 +21,8 @@ pub enum DataSourceMessage {
 // THIS IS STILL UNDER CONSTRUCTION WE HAVE NOT FINALIZED THIS TRAIT AND THE CONTRACT IT MAKES
 // BETWEEN JESTER AND YOUR LIBRARY USE AT YOUR OWN RISK
 pub trait Processor {
+    fn init(&self) -> Result<(), ProcessorError>;
+
     fn process(
         &self,
         file: PathBuf,

@@ -259,8 +259,12 @@ async fn main() {
         None => {}
         Some(p) => unsafe {
             let external_functions = Plugin::new(p).expect("Plugin loading failed");
-
-            plugin = Some(external_functions)
+            match external_functions.init() {
+                Ok(_) => plugin = Some(external_functions),
+                Err(e) => {
+                    panic!("error while initializing plugin {:?}", e)
+                }
+            }
         },
     };
 
@@ -370,7 +374,19 @@ async fn data_source_thread(
                                 };
                                 ();
                             }
-                            DataSourceMessage::Data(_) => {}
+                            DataSourceMessage::Data(d) => {
+                                match api
+                                    .import(container_id, data_source_id, None, Some(d))
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        debug!("file successfully uploaded to DeepLynx")
+                                    }
+                                    Err(e) => {
+                                        error!("unable to upload file to DeepLynx {:?}", e)
+                                    }
+                                }
+                            }
                             DataSourceMessage::Close => {}
                         }
                     }
