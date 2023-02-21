@@ -16,8 +16,8 @@ pub struct PluginProxy {
 }
 
 impl Processor for PluginProxy {
-    fn init(&self) -> Result<(), ProcessorError> {
-        self.function.init()
+    fn init(&self, db: Pool<Sqlite>) -> Result<(), ProcessorError> {
+        self.function.init(db)
     }
 
     fn process(
@@ -80,8 +80,8 @@ impl Plugin {
         })
     }
 
-    pub fn init(&self) -> Result<(), ProcessorError> {
-        self.functions.init()
+    pub fn init(&self, db: Pool<Sqlite>) -> Result<(), ProcessorError> {
+        self.functions.init(db)
     }
 
     pub fn process(

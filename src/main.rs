@@ -259,7 +259,7 @@ async fn main() {
         None => {}
         Some(p) => unsafe {
             let external_functions = Plugin::new(p).expect("Plugin loading failed");
-            match external_functions.init() {
+            match external_functions.init(db.clone()) {
                 Ok(_) => plugin = Some(external_functions),
                 Err(e) => {
                     panic!("error while initializing plugin {:?}", e)
