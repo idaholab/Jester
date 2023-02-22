@@ -12,3 +12,4 @@ rustc_version = "0.4.0"
 tokio = { version = "1", features = ["full", "io-util", "fs"] }
 thiserror = "1.0.38"
 sqlx = { version = "0.6.2", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
+anyhow = "1.0.69"
