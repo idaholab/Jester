@@ -1,3 +1,4 @@
+use crate::DataSourceMessage;
 use std::any::Any;
 use thiserror::Error;
 
@@ -9,4 +10,6 @@ pub enum ProcessorError {
     ThreadError(Box<dyn Any + Send>),
     #[error(transparent)]
     PluginError(#[from] anyhow::Error),
+    #[error("channel send error")]
+    ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<DataSourceMessage>),
 }
