@@ -127,6 +127,7 @@ struct FileConfig {
     container_id: u64, // ids are 64 bit uints to match the data type DeepLynx uses
     timeseries_data_source_id: Option<u64>,
     graph_data_source_id: Option<u64>,
+    scan_interval: u64,
 }
 
 // a thread-safe map of all the data sources - this insures we have only one active thread per data
@@ -436,7 +437,7 @@ async fn watch_file(
     info!("starting watch {}", file.path_pattern);
     loop {
         // sleep at the start so we always hit it
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(file.scan_interval)).await;
         debug!("watching {}", file.path_pattern);
         for entry in glob(file.path_pattern.as_str())? {
             let path = match entry {
@@ -584,7 +585,7 @@ async fn watch_file(
                     }
                     Err(e) => {
                         error!(
-                            "unable to process the watched file at {}: {:?}",
+                            "unable to process the watched file at {}: {}",
                             path.to_str().unwrap(),
                             e
                         )

@@ -5,6 +5,8 @@ files:
   - timeseries_data_source_id: 469
     container_id: 1
     path_pattern: "./sample_dir/*.csv"
+    scan_interval: 15
   - timeseries_data_source_id: 1146
     container_id: 1
     path_pattern: "./sample_dir/*.json"
+    scan_interval: 5
