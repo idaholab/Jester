@@ -1,3 +1,4 @@
+#![feature(closure_track_caller)]
 pub mod errors;
 
 use crate::errors::ProcessorError;
