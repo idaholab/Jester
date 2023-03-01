@@ -127,7 +127,7 @@ impl DeepLynxAPI {
 
         let server = &self.server;
         let route = format!(
-            "{server}/containers/{container_id}/import/datasources/{data_source_id}/imports"
+            "{server}/containers/{container_id}/import/datasources/{data_source_id}/imports?fastLoad=true"
         );
         let mut agent = self.client.post(route.as_str());
 
