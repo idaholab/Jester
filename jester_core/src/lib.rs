@@ -3,9 +3,7 @@ pub mod errors;
 
 use crate::errors::ProcessorError;
 use sqlx::{Pool, Sqlite};
-use std::io::Read;
 use std::path::PathBuf;
-use std::sync::mpsc::SyncSender;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub static CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
