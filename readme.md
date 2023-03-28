@@ -9,7 +9,11 @@ Jester has no requirements apart from the ability to run a binary on the host sy
 
 ### Building from Source Requirements
 
-- Rust ^1.6.5
+- Rust ^1.6.5 (Nightly Branch)
+
+#### Switching to Nightly
+1. Run `rustup toolchain install nightly`
+2. Run `rustup default nightly`
 
 
 ## Usage
