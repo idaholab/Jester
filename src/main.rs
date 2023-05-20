@@ -90,6 +90,7 @@ use sqlx::{Pool, Sqlite, SqlitePool};
 use crate::deep_lynx::DeepLynxAPI;
 use crate::templates::MAIN_PAGE_TEMPLATE;
 use env_logger;
+use futures::future::join_all;
 use handlebars::Handlebars;
 use include_dir::include_dir;
 use serde_json::json;
@@ -121,7 +122,7 @@ struct Config {
     files: Vec<FileConfig>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 struct FileConfig {
     path_pattern: String,
     container_id: u64, // ids are 64 bit uints to match the data type DeepLynx uses
@@ -238,7 +239,7 @@ async fn main() {
                 data_source_channels.clone(),
                 client.clone(),
                 file.timeseries_data_source_id.clone(),
-                file.container_id,
+                file.clone().container_id,
             )
             .await;
         }
@@ -248,7 +249,7 @@ async fn main() {
                 data_source_channels.clone(),
                 client.clone(),
                 file.graph_data_source_id.clone(),
-                file.container_id,
+                file.clone().container_id,
             )
             .await;
         }
@@ -363,7 +364,12 @@ async fn data_source_thread(
                             // take the provided path and upload it to DeepLynx
                             DataSourceMessage::File(path) => {
                                 match api
-                                    .import(container_id, data_source_id, Some(path), None)
+                                    .import(
+                                        container_id.clone(),
+                                        data_source_id.clone(),
+                                        Some(path),
+                                        None,
+                                    )
                                     .await
                                 {
                                     Ok(_) => {
@@ -377,7 +383,12 @@ async fn data_source_thread(
                             }
                             DataSourceMessage::Data(d) => {
                                 match api
-                                    .import(container_id, data_source_id, None, Some(d))
+                                    .import(
+                                        container_id.clone(),
+                                        data_source_id.clone(),
+                                        None,
+                                        Some(d),
+                                    )
                                     .await
                                 {
                                     Ok(_) => {
@@ -437,205 +448,153 @@ async fn watch_file(
     info!("starting watch {}", file.path_pattern);
     loop {
         // sleep at the start so we always hit it
-        sleep(Duration::from_secs(file.scan_interval)).await;
+        sleep(Duration::from_secs(file.clone().scan_interval)).await;
         debug!("watching {}", file.path_pattern);
+        let mut handles = vec![];
         for entry in glob(file.path_pattern.as_str())? {
             let path = match entry {
                 Ok(p) => p,
                 Err(e) => return Err(WatcherError::GlobError(e)),
             };
 
-            // we will need the checksum at some point
-            let f = File::open(&path)?;
-            let checksum = adler32(BufReader::new(f))?;
+            let file_t = file.clone();
+            let data_sources_t = data_sources.clone();
+            let plugin_t = plugin.clone();
+            let db_t = db.clone();
 
-            // TODO: update this query with an optional time to make subsequent queries after we've been running faster
-            match sqlx::query_as::<_, DBFile>(
-                "SELECT * FROM files WHERE pattern = ? AND container_id = ? LIMIT 1",
-            )
-            .bind(&path.to_str().unwrap())
-            .bind(file.container_id.to_string())
-            .fetch_one(&db)
-            .await
-            {
-                Ok(f) => {
-                    // if the file exists in the db and has a transmitted at date we need to check the last modified date and make
-                    // sure we shouldn't resend it TODO: clarify this functionality and modify to handle files where we stopped halfway
-                    match f.transmitted_at {
-                        None => {} // if not transmitted we assume it needs to be sent to DeepLynx
-                        Some(transmitted_at) => {
-                            let last_modified_at: DateTime<Utc> =
-                                fs::metadata(&path)?.modified()?.into();
-                            let transmitted_at =
-                                DateTime::parse_from_rfc3339(transmitted_at.as_str())?;
+            let handle = tokio::spawn(async move {
+                run_watch_action(file_t, data_sources_t, plugin_t, db_t, &path).await
+            });
 
-                            if last_modified_at > transmitted_at {
-                                // we should double check the checksum of the file in insure it really is different
-                                // we're using adler here because it's great for quick data integrity checks and
-                                // that's all we need really, if it's the same, skip the file
-                                match f.checksum {
-                                    None => {}
-                                    Some(c) => {
-                                        if c == checksum {
-                                            debug!("file at {} hasn't changed since transmission, skipping", &path.to_str().unwrap());
-                                            continue;
-                                        }
-                                    }
+            handles.push(handle);
+        }
+
+        join_all(handles).await;
+    }
+}
+
+async fn run_watch_action(
+    file: FileConfig,
+    data_sources: DataSources,
+    plugin: Arc<RwLock<Option<Plugin>>>,
+    db: Pool<Sqlite>,
+    path: &PathBuf,
+) -> Result<(), WatcherError> {
+    // we will need the checksum at some point
+    let f = File::open(&path)?;
+    let checksum = adler32(BufReader::new(f))?;
+
+    // TODO: update this query with an optional time to make subsequent queries after we've been running faster
+    match sqlx::query_as::<_, DBFile>(
+        "SELECT * FROM files WHERE pattern = ? AND container_id = ? LIMIT 1",
+    )
+    .bind(&path.to_str().unwrap())
+    .bind(file.container_id.to_string())
+    .fetch_one(&db)
+    .await
+    {
+        Ok(f) => {
+            // if the file exists in the db and has a transmitted at date we need to check the last modified date and make
+            // sure we shouldn't resend it TODO: clarify this functionality and modify to handle files where we stopped halfway
+            match f.transmitted_at {
+                None => {} // if not transmitted we assume it needs to be sent to DeepLynx
+                Some(transmitted_at) => {
+                    let last_modified_at: DateTime<Utc> = fs::metadata(&path)?.modified()?.into();
+                    let transmitted_at = DateTime::parse_from_rfc3339(transmitted_at.as_str())?;
+
+                    if last_modified_at > transmitted_at {
+                        // we should double check the checksum of the file in insure it really is different
+                        // we're using adler here because it's great for quick data integrity checks and
+                        // that's all we need really, if it's the same, skip the file
+                        match f.checksum {
+                            None => {}
+                            Some(c) => {
+                                if c == checksum {
+                                    debug!(
+                                        "file at {} hasn't changed since transmission, skipping",
+                                        &path.to_str().unwrap()
+                                    );
+                                    return Ok(());
                                 }
-                            } else {
-                                debug!(
-                                    "file at {} hasn't changed since transmission, skipping",
-                                    &path.to_str().unwrap()
-                                );
-                                continue;
                             }
                         }
+                    } else {
+                        debug!(
+                            "file at {} hasn't changed since transmission, skipping",
+                            &path.to_str().unwrap()
+                        );
+                        return Ok(());
                     }
                 }
-                Err(e) => {
-                    match e {
-                        RowNotFound => {
-                            // if it's not found, enter it in the db
-                            match sqlx::query("INSERT INTO files(pattern, container_id, created_at) VALUES (?,?,?)")
-                                .bind(&path.to_str().unwrap())
-                                .bind(file.container_id.to_string())
-                                .bind(Utc::now().to_rfc3339())
-                                .execute(&db)
-                                .await
-                            {
-                                Ok(_) => {
-                                    debug!("file at {} added to database", &path.to_str().unwrap())
-                                }
-                                Err(e) => {
-                                    error!(
-                        "unable to update the database with initial record for {}: {:?}",
-                        path.to_str().unwrap(),
-                        e
+            }
+        }
+        Err(e) => {
+            match e {
+                RowNotFound => {
+                    // if it's not found, enter it in the db
+                    match sqlx::query(
+                        "INSERT INTO files(pattern, container_id, created_at) VALUES (?,?,?)",
                     )
-                                }
-                            }
+                    .bind(&path.to_str().unwrap())
+                    .bind(file.container_id.to_string())
+                    .bind(Utc::now().to_rfc3339())
+                    .execute(&db)
+                    .await
+                    {
+                        Ok(_) => {
+                            debug!("file at {} added to database", &path.to_str().unwrap())
                         }
-                        _ => {
-                            error!("unable to fetch files from db {:?}", e);
-                            continue;
-                        }
-                    }
-                }
-            };
-
-            // now that we know we don't have this file in the db, or that it needs to be reprocessed - do so
-            if plugin.read().await.is_some() {
-                let mut timeseries: Option<UnboundedSender<DataSourceMessage>> = None;
-                let mut graph: Option<UnboundedSender<DataSourceMessage>> = None;
-
-                match file.timeseries_data_source_id {
-                    None => {}
-                    Some(id) => {
-                        timeseries = data_sources
-                            .read()
-                            .await
-                            .get(&(file.container_id, id))
-                            .cloned()
-                    }
-                }
-
-                match file.graph_data_source_id {
-                    None => {}
-                    Some(id) => {
-                        graph = data_sources
-                            .read()
-                            .await
-                            .get(&(file.container_id, id))
-                            .cloned()
-                    }
-                }
-
-                match plugin.read().await.as_ref().unwrap().process(
-                    path.clone(),
-                    db.clone(),
-                    timeseries,
-                    graph,
-                ) {
-                    Ok(_) => {
-                        // update the file setting its transmitted time
-                        // capture any errors in the db if the transmission runs into issues
-                        // yes this is duplicated code, so we can pull it out into a function at some point -
-                        // I just needed something working now
-                        match sqlx::query(
-                            "UPDATE files SET transmitted_at = ?, checksum = ? WHERE pattern = ? AND container_id = ?",
-                        )
-                        .bind(Utc::now().to_rfc3339())
-                        .bind(checksum)
-                        .bind(&path.to_str().unwrap())
-                        .bind(file.container_id.to_string())
-                        .execute(&db)
-                        .await
-                        {
-                            Ok(_) => {
-                                info!("file at {} transmitted to DeepLynx", path.to_str().unwrap())
-                            }
-                            Err(e) => {
-                                error!(
-                                    "unable to update the database with transmit time for {}: {:?}",
-                                    path.to_str().unwrap(),
-                                    e
-                                )
-                            }
+                        Err(e) => {
+                            error!(
+                                "unable to update the database with initial record for {}: {:?}",
+                                path.to_str().unwrap(),
+                                e
+                            )
                         }
                     }
-                    Err(e) => {
-                        error!(
-                            "unable to process the watched file at {}: {}",
-                            path.to_str().unwrap(),
-                            e
-                        )
-                    }
                 }
-            } else {
-                // fall back to the default behavior of simply sending the file to DeepLynx, we do this
-                // by sending a message to the relevant data sources with the file's path
-                match file.timeseries_data_source_id {
-                    None => {}
-                    Some(id) => match data_sources.write().await.get(&(file.container_id, id)) {
-                        None => {}
-                        Some(channel) => {
-                            let p = path.clone();
-                            match channel.send(DataSourceMessage::File(p)) {
-                                Ok(_) => {
-                                    debug!(
-                                        "transmitted file at {} to the data source",
-                                        &path.to_str().unwrap()
-                                    );
-                                }
-                                Err(e) => {
-                                    error!("error sending file message to DataSource {:?}", e)
-                                }
-                            }
-                        }
-                    },
+                _ => {
+                    error!("unable to fetch files from db {:?}", e);
+                    return Ok(());
                 }
+            }
+        }
+    };
 
-                match file.graph_data_source_id {
-                    None => {}
-                    Some(id) => match data_sources.write().await.get(&(file.container_id, id)) {
-                        None => {}
-                        Some(channel) => {
-                            let p = path.clone();
-                            match channel.send(DataSourceMessage::File(p)) {
-                                Ok(_) => {
-                                    debug!(
-                                        "transmitted file at {} to the data source",
-                                        &path.to_str().unwrap()
-                                    );
-                                }
-                                Err(e) => {
-                                    error!("error sending file message to DataSource {:?}", e)
-                                }
-                            };
-                        }
-                    },
-                }
+    // now that we know we don't have this file in the db, or that it needs to be reprocessed - do so
+    if plugin.read().await.is_some() {
+        let mut timeseries: Option<UnboundedSender<DataSourceMessage>> = None;
+        let mut graph: Option<UnboundedSender<DataSourceMessage>> = None;
 
+        match file.timeseries_data_source_id {
+            None => {}
+            Some(id) => {
+                timeseries = data_sources
+                    .read()
+                    .await
+                    .get(&(file.container_id, id))
+                    .cloned()
+            }
+        }
+
+        match file.graph_data_source_id {
+            None => {}
+            Some(id) => {
+                graph = data_sources
+                    .read()
+                    .await
+                    .get(&(file.clone().container_id, id))
+                    .cloned()
+            }
+        }
+
+        match plugin.read().await.as_ref().unwrap().process(
+            path.clone(),
+            db.clone(),
+            timeseries,
+            graph,
+        ) {
+            Ok(_) => {
                 // update the file setting its transmitted time
                 // capture any errors in the db if the transmission runs into issues
                 // yes this is duplicated code, so we can pull it out into a function at some point -
@@ -655,13 +614,95 @@ async fn watch_file(
                     }
                     Err(e) => {
                         error!(
+                                    "unable to update the database with transmit time for {}: {:?}",
+                                    path.to_str().unwrap(),
+                                    e
+                                )
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    "unable to process the watched file at {}: {}",
+                    path.to_str().unwrap(),
+                    e
+                )
+            }
+        }
+    } else {
+        // fall back to the default behavior of simply sending the file to DeepLynx, we do this
+        // by sending a message to the relevant data sources with the file's path
+        match file.timeseries_data_source_id {
+            None => {}
+            Some(id) => match data_sources.write().await.get(&(file.container_id, id)) {
+                None => {}
+                Some(channel) => {
+                    let p = path.clone();
+                    match channel.send(DataSourceMessage::File(p)) {
+                        Ok(_) => {
+                            debug!(
+                                "transmitted file at {} to the data source",
+                                &path.to_str().unwrap()
+                            );
+                        }
+                        Err(e) => {
+                            error!("error sending file message to DataSource {:?}", e)
+                        }
+                    }
+                }
+            },
+        }
+
+        match file.graph_data_source_id {
+            None => {}
+            Some(id) => match data_sources
+                .write()
+                .await
+                .get(&(file.clone().container_id, id))
+            {
+                None => {}
+                Some(channel) => {
+                    let p = path.clone();
+                    match channel.send(DataSourceMessage::File(p)) {
+                        Ok(_) => {
+                            debug!(
+                                "transmitted file at {} to the data source",
+                                &path.to_str().unwrap()
+                            );
+                        }
+                        Err(e) => {
+                            error!("error sending file message to DataSource {:?}", e)
+                        }
+                    };
+                }
+            },
+        }
+
+        // update the file setting its transmitted time
+        // capture any errors in the db if the transmission runs into issues
+        // yes this is duplicated code, so we can pull it out into a function at some point -
+        // I just needed something working now
+        match sqlx::query(
+            "UPDATE files SET transmitted_at = ?, checksum = ? WHERE pattern = ? AND container_id = ?",
+        )
+            .bind(Utc::now().to_rfc3339())
+            .bind(checksum)
+            .bind(&path.to_str().unwrap())
+            .bind(file.container_id.to_string())
+            .execute(&db)
+            .await
+        {
+            Ok(_) => {
+                info!("file at {} transmitted to DeepLynx", path.to_str().unwrap())
+            }
+            Err(e) => {
+                error!(
                             "unable to update the database with transmit time for {}: {:?}",
                             path.to_str().unwrap(),
                             e
                         )
-                    }
-                }
             }
         }
     }
+    Ok(())
 }
