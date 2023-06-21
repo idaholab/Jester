@@ -129,6 +129,7 @@ struct FileConfig {
     timeseries_data_source_id: Option<u64>,
     graph_data_source_id: Option<u64>,
     scan_interval: u64,
+    delete_after_read: Option<bool>,
 }
 
 // a thread-safe map of all the data sources - this insures we have only one active thread per data
@@ -367,18 +368,31 @@ async fn data_source_thread(
                                     .import(
                                         container_id.clone(),
                                         data_source_id.clone(),
-                                        Some(path),
+                                        Some(path.0.clone()),
                                         None,
                                     )
                                     .await
                                 {
                                     Ok(_) => {
-                                        debug!("file successfully uploaded to DeepLynx")
+                                        debug!("file successfully uploaded to DeepLynx");
+
+                                        // if we've asked to delete the file, well, delete it
+                                        if path.1 {
+                                            match tokio::fs::remove_file(path.0).await {
+                                                Ok(_) => {
+                                                    debug!("file successfully removed after send")
+                                                }
+                                                Err(e) => {
+                                                    debug!("unable to remove file {:?}", e)
+                                                }
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         error!("unable to upload file to DeepLynx {:?}", e)
                                     }
                                 };
+
                                 ();
                             }
                             DataSourceMessage::Data(d) => {
@@ -638,7 +652,10 @@ async fn run_watch_action(
                 None => {}
                 Some(channel) => {
                     let p = path.clone();
-                    match channel.send(DataSourceMessage::File(p)) {
+                    match channel.send(DataSourceMessage::File((
+                        p,
+                        file.delete_after_read.unwrap_or(false),
+                    ))) {
                         Ok(_) => {
                             debug!(
                                 "transmitted file at {} to the data source",
@@ -663,7 +680,10 @@ async fn run_watch_action(
                 None => {}
                 Some(channel) => {
                     let p = path.clone();
-                    match channel.send(DataSourceMessage::File(p)) {
+                    match channel.send(DataSourceMessage::File((
+                        p,
+                        file.delete_after_read.unwrap_or(false),
+                    ))) {
                         Ok(_) => {
                             debug!(
                                 "transmitted file at {} to the data source",

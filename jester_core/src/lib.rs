@@ -11,7 +11,7 @@ pub static RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 
 #[derive(Debug)]
 pub enum DataSourceMessage {
-    File(PathBuf),
+    File((PathBuf, bool)),
     Data(Vec<u8>),
     Close,
 }

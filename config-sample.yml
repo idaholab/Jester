@@ -10,3 +10,4 @@ files:
     container_id: 1
     path_pattern: "./sample_dir/*.json"
     scan_interval: 5
+    delete_after_read: true
