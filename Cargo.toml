@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.0.17", features = ["derive"] }
-wild = "2.1.0"
 serde = { version = "1.0.145", features = ["derive"]}
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["full", "io-util", "fs"] }
