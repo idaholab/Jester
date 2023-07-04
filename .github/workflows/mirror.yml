@@ -1,0 +1,20 @@
+name: Mirror to Github
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  mirror-repository:
+    runs-on: [ self-hosted ]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: development
+      - shell: bash
+        name: mirror-jester-repo
+        run: |
+          git fetch --unshallow origin
+          git remote add github-pub ${{ secrets.PUBLIC_GITHUB_URL }} || git remote set-url github-pub ${{ secrets.PUBLIC_GITHUB_URL }}
+          git push github-pub main --force
+          git push github-pub --tags
