@@ -320,7 +320,7 @@ async fn main() {
             .map(handlebars);
 
         // we only serve on the local machine, don't want this exposed outside of it typically
-        warp::serve(route).run(([127, 0, 0, 1], 3030)).await;
+        warp::serve(route).run(([0, 0, 0, 0], 3030)).await;
     }
 
     // if all the directory threads finish it means the directory's no longer exist and the program
