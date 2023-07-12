@@ -89,10 +89,10 @@ use sqlx::{Pool, Sqlite, SqlitePool};
 
 use crate::deep_lynx::DeepLynxAPI;
 use crate::templates::MAIN_PAGE_TEMPLATE;
-use env_logger;
 use futures::future::join_all;
 use handlebars::Handlebars;
 use include_dir::include_dir;
+use log::LevelFilter::Debug;
 use serde_json::json;
 use sqlx::Error::RowNotFound;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -155,8 +155,6 @@ where
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
-
     let cli: Arguments = Arguments::parse();
 
     let config_file_path = match cli.config_file {
@@ -189,6 +187,23 @@ async fn main() {
         error!("Must provide directories to monitor");
         std::process::exit(1)
     }
+
+    // set the log to output to file and stdout
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Error)
+        .chain(std::io::stdout())
+        .chain(fern::log_file("deeplynx_loader.log").unwrap())
+        .apply()
+        .unwrap();
 
     // create and/or connect to a local db file managed by sqlite - this is how we keep track of
     // the files we've seen for individual path patterns for an individual containers
