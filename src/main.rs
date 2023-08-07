@@ -617,7 +617,7 @@ async fn run_watch_action(
             }
         }
 
-        match plugin.read().await.as_ref().unwrap().process(
+        match plugin.write().await.as_ref().unwrap().process(
             path.clone(),
             db.clone(),
             timeseries,

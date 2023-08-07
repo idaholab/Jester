@@ -8,7 +8,7 @@ pub enum ProcessorError {
     Unknown,
     #[error("thread error")]
     ThreadError(Box<dyn Any + Send>),
-    #[error(transparent)]
+    #[error("plugin error: {0}")]
     PluginError(#[from] anyhow::Error),
     #[error("channel send error")]
     ChannelSendError(#[from] tokio::sync::mpsc::error::SendError<DataSourceMessage>),
